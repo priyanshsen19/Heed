@@ -49,9 +49,12 @@ Boundary rules: TB1 carries only Heed-scoped credentials and user-visible data. 
 |---|---|---|
 | `GOOGLE_CLIENT_ID` (public identifier) | Server config; may appear in the OAuth URL | n/a (not secret) |
 | `GOOGLE_CLIENT_SECRET` | Secret Manager | Extension, repo, image layers, logs |
-| `GEMINI_API_KEY` | Secret Manager | Extension, repo, logs |
-| `DATABASE_URL`, `DIRECT_URL` | Secret Manager | Extension, repo, logs |
-| `DATA_KEY_<id>`, `HMAC_PEPPER` | Secret Manager | Extension, DB, repo, logs |
+| `GEMINI_API_KEY` (and any other AI provider key) | Secret Manager (inside the single runtime JSON secret) | Extension, repo, logs |
+| `DATABASE_URL` (pooled, runtime) | Secret Manager (same JSON secret) | Extension, repo, logs |
+| `DIRECT_URL` (migrations) | GitHub environment secret used only by the deploy job | Extension, repo, runtime, logs |
+| `DATA_KEY_<id>`, `HMAC_PEPPER` | Secret Manager (same JSON secret) | Extension, DB, repo, logs |
+
+All runtime secrets are one JSON secret version read once per instance start (this stays within the Secret Manager free allowance of 6 active versions and 10,000 access operations per month; separate secrets would not). Trade-off: IAM granularity is per secret, so the runtime service account sees all runtime secrets, which is already true of the runtime process. No development credential is ever used in staging or production: each environment has its own OAuth client, database branch, keys, and AI key.
 | Google refresh/access tokens | DB (encrypted refresh), server memory | Extension (any form), logs, API responses, export file |
 | `SCHEDULER_SA_EMAIL`, `SERVICE_URL` (OIDC audience) | Server config | n/a (identifiers) |
 | `BETA_ALLOWED_EMAILS` | Server config | Extension |
@@ -87,9 +90,12 @@ The Heed session token the extension *does* hold is a Heed-scoped, revocable, op
 | T17 | Denial of service / cost abuse | Flooding API, forcing AI use | Rate limits; per-user and global AI budgets; Cloud Run `max-instances=2`; budget alert; beta allowlist; kill switch |
 | T18 | Replay of mutations | Re-sent requests | Idempotency keys; `If-Match` versions; state-machine validation |
 | T19 | Reminder spoofing | Fake notifications | Reminders carry only IDs; text is composed locally from authenticated, cached data |
-| T20 | Insecure deletion / data remanence | Backups, caches | Deletion semantics (DATA_MODEL 7); local store cleared on sign-out; provider PITR window (6 h) disclosed |
+| T20 | Insecure deletion / data remanence | Backups, caches | Deletion semantics (DATA_MODEL 9); local store cleared on sign-out; provider PITR window (6 h) disclosed |
 | T21 | Scheduler endpoint abuse | Calling `/internal/tick` | OIDC token verification (issuer, audience, SA email, expiry); idempotent and budget-bounded work; not CORS-enabled |
 | T22 | Phishing via the OAuth consent | Lookalike Heed | Fixed redirect allowlist; distinct consent screen; documented beta distribution channel |
+| T23 | Mail content exposure through the AI provider's data-use terms (free tier) | Free-tier terms permit the provider to use submitted content to improve its products and allow human review | Minimization and redaction (about 3% of mail, at most 1,500 redacted characters), explicit per-user consent with the `FREE_TIER` disclosure, region attestation, tier guard that fails closed, quota-aware routing that can prefer no-training pool entries, instant switch to paid tier by configuration, and the public-launch gate in DECISIONS D-18. This is an accepted, disclosed risk for a closed beta, not a mitigated one |
+| T24 | Cross-site or cross-origin request forgery | Browser auto-sending credentials | CSRF is closed by construction: the JSON API accepts only an explicit `Authorization: Bearer` header (no cookies, no ambient credentials), CORS allows only the extension origin, and the only browser-navigated endpoints (`/v1/auth/google/*`) are protected by single-use `state`, PKCE, and `nonce` |
+| T25 | Notification payload tampering or injection | Malicious or stale payload shown to the user | Payloads are server-composed from validated fields, delivered only over the authenticated API, rendered as plain text, and carry only in-extension deep links (never external URLs) |
 
 ## 5. OAuth security details
 
@@ -137,7 +143,7 @@ The Heed session token the extension *does* hold is a Heed-scoped, revocable, op
 
 - **Authz:** every query scoped by session `userId`; foreign IDs return 404; route-registry test enforces an auth class and an authz test per route.
 - **Validation:** Zod on all inputs, strict objects; body limit 64 KB; strict content-type; response serialization by schema (no accidental field leaks such as `refreshTokenEnc`, `tokenHash`, `fingerprint`, `participantHashes`, which are excluded in a single serialization layer and covered by a test).
-- **Rate limiting:** per-IP for unauthenticated routes and per-user for authenticated ones (API.md section 11). In-memory counters are acceptable with `max-instances=2` (a documented approximation); Postgres-backed counters are the upgrade path.
+- **Rate limiting:** per-IP for unauthenticated routes and per-user for authenticated ones (API.md section 11), through the `RateLimiter` port with **Postgres-backed counters** (`RateLimitCounter`) so limits hold across instances and restarts; a per-instance prefilter is an optimization only. AI usage limits are likewise persisted (`AiUsage`, `AiProviderUsage`).
 - **HTTP hardening:** HSTS; `X-Content-Type-Options: nosniff`; error HTML pages (OAuth failures) are static with CSP `default-src 'none'`; `Cache-Control: no-store` on auth and data responses; no wildcard CORS; no stack traces in responses.
 - **Dependencies:** minimal; `pnpm audit`/OSV scan in CI; Dependabot; lockfile with integrity; Node base image pinned by digest and rebuilt weekly.
 - **Container:** multi-stage build, non-root user, no shell in the final image where feasible, read-only root FS, only the port exposed.
@@ -154,7 +160,7 @@ The Heed session token the extension *does* hold is a Heed-scoped, revocable, op
 - Minimization first: bodies never persisted; evidence at most 300 chars; descriptions and attendee lists never persisted.
 - Encryption: field-level for tokens and email-derived text; provider-level at rest for everything; TLS in transit everywhere.
 - Backups: no custom backups in V1; Neon PITR (6 h window on the free plan). Deleted data can persist in provider history for up to that window.
-- Logs: no content (section 4, T16); `AuditLog` records security events without content; retention per DATA_MODEL section 6.
+- Logs: no content (section 4, T16); `AuditLog` records security events without content; retention per DATA_MODEL section 8.
 - Exports contain decrypted evidence only for the authenticated owner and exclude tokens, hashes, and fingerprints.
 
 ## 11. Compliance posture: Google API Services User Data Policy (Limited Use)
@@ -164,7 +170,7 @@ Gmail restricted-scope data is handled to comply with the Limited Use requiremen
 1. **Use only to provide user-facing features** (detecting and reminding about tasks). No advertising, no data brokering, no creditworthiness or similar uses.
 2. **No transfer to third parties** except as necessary to provide those features (the AI provider as a subprocessor receiving a redacted excerpt), for security/abuse, or legal compliance.
 3. **No human reading** of user data except with the user's explicit consent for specific messages, for security investigation, or legal requirement. Developers have no admin UI to read evidence; database access is break-glass only and logged.
-4. **No use to develop, improve, or train generalized AI/ML models.** This is why the AI provider must be on terms that prohibit training on submitted data (the paid-tier guard, AI.md section 5). Heed itself performs no training or fine-tuning.
+4. **No use to develop, improve, or train generalized AI/ML models.** Google's Workspace API user data policy (as summarized by secondary sources; the official page could not be fetched from the build environment) prohibits using Google user data to create, train, or improve ML/AI models. Heed itself performs no training or fine-tuning, but **sending Gmail-derived excerpts to a provider tier whose terms allow training (the Gemini free tier) is in tension with this requirement.** Stage 0 records this as an explicit, gated conflict (DECISIONS CF-1, D-18): the closed beta may run in free-tier mode with informed consent, region attestation, and minimization; the tier guard fails closed; the same code runs on a no-training tier by configuration; and **free-tier mode must end before any Google OAuth verification submission or any public launch**, because verification review would not accept it.
 5. **Disclosure:** the privacy policy and in-product consent describe exactly the above (PRIVACY.md).
 
 Chrome Web Store User Data Policy: single-purpose extension, limited-use certification in the listing, accurate permission justifications, privacy policy link.
@@ -204,7 +210,7 @@ Target: notify affected beta users within 72 hours of confirming a breach affect
 - [ ] Encrypted columns verified as ciphertext in a staging DB dump; key rotation drill done once.
 - [ ] Log canary test passes; manual review of a staging log sample.
 - [ ] Disconnect and delete flows verified end to end (including Google revocation and a "no rows remain" query for a deleted user).
-- [ ] AI tier guard verified (`AI_DATA_TIER=paid` in prod, or free-tier override consciously accepted and consent text switched).
+- [ ] AI tier guard verified: prod boots only with a consistent `AI_DATA_TIER`/acknowledgment/consent-variant combination; in free-tier mode, `AI_FREE_TIER_ACKNOWLEDGED=true`, the `FREE_TIER` consent text, and the region attestation are all enforced per user (tests cover each refusal path).
 - [ ] Phase 0 spikes complete: independent revoke semantics; unverified-app production refresh-token behavior; `launchWebAuthFlow` on the target Chrome versions.
 - [ ] Secrets scanning and push protection on; branch protection on `main`; 2FA on GitHub, GCP, Neon, Web Store.
 - [ ] ZAP baseline run against staging with no high findings.
@@ -216,7 +222,7 @@ Target: notify affected beta users within 72 hours of confirming a breach affect
 |---|---|---|
 | Session token is long-lived in extension storage | Revocable and Heed-scoped; needed for UX (no re-login every browser restart) | Rotation on refresh in V2 |
 | Runtime compromise can decrypt tokens | Single-operator beta, ten users, instant revoke-all runbook | KMS envelope, separate token-service in V2 |
-| In-memory rate limits per instance | `max-instances=2`; low traffic | More users |
+| Per-instance prefilter ahead of the Postgres rate limiter | Optimization only; correctness comes from persisted counters | Redis or edge limiting at scale |
 | Unverified Google app warning and the 100-user cap | Beta scope; allowlist enforced | Verification and security assessment before wider launch |
 | Provider-retained history up to 6 h after deletion | Free-plan limit; disclosed | Paid DB plan |
-| Gemini retains data per its abuse-monitoring terms | Vendor terms; disclosed; minimized and redacted input | Alternative provider or Vertex AI with stricter terms |
+| AI provider data use: free tier may train on and humans may review submitted excerpts; paid tier retains logs for abuse monitoring (reported as 55 days) | Owner decision for a closed beta; disclosed with explicit consent; minimized and redacted input; fails closed; config switch to a no-training tier | Before any verification submission or public launch (mandatory), and whenever a no-training free option becomes viable |

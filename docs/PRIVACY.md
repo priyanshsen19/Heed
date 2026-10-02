@@ -15,7 +15,7 @@ Status: Draft for sign-off. This document is both the **engineering contract** f
 |---|---|---|---|
 | Google account | `openid email profile` | Your Google account ID and email address | Sign-in and identifying your account |
 | Google Calendar | `calendar.events.readonly` (read-only) | Events on your primary calendar from yesterday to 30 days ahead: title, times, status, who is invited, and the description text | Linking tasks to events and finding tasks in event descriptions |
-| Gmail | `gmail.readonly` (read-only) | Message **headers** (sender, recipients, subject, date, labels, list headers) for new messages in your Inbox; the **body** of messages that pass the header checks, **transiently in server memory** | Finding tasks you are asked to do |
+| Gmail | `gmail.readonly` (read-only) | Message **headers** (sender, recipients, subject, date, labels, list headers) for new messages in your Inbox; the **body** of messages that pass the header checks, **transiently in server memory**. **Only if you separately opt in:** headers and bodies of messages you **sent**, to find commitments you made | Finding tasks you are asked to do and commitments you made |
 
 Heed cannot send, delete, modify, label, or archive anything in Gmail or Calendar. It never opens attachments. It does not access your contacts.
 
@@ -31,7 +31,11 @@ Messages in Spam, Trash, Drafts, Promotions, Social, and Forums are skipped. Bul
 | Detected task (title, deadline, status, notes you add) | Yes | Visible to you; plaintext in the database |
 | Evidence for each task: one verbatim sentence or two (at most 300 characters), the email subject, the sender, the received date, which signals fired, the AI's one-sentence explanation | Yes | **Encrypted** in the database. Shown only to you in the "Why" panel |
 | Link to the email in Gmail | Yes (message and thread IDs) | Opens in your own Gmail session; Heed does not fetch it |
-| A log of which messages were examined | Yes (IDs and outcome only) | Message ID, thread ID, date, outcome (e.g. "dropped by filter"), score, rule IDs. No sender, subject, or content. Kept 45 days |
+| A log of messages whose body was examined | Yes (IDs and outcome only) | Message ID, thread ID, date, outcome (e.g. "no task found"), scores, rule IDs. No sender, subject, or content. Messages dropped by header checks alone are only **counted**, not logged. Kept 30 days |
+| People and organizations behind your items ("Jane, recruiter at Acme") | Yes (minimal) | Display name and organization **encrypted**; a one-way hash of the email address for matching; the domain. Removed 30 days after nothing references them |
+| Notifications Heed prepared for you | Yes | The reminder text you see (task and event titles you already see in Heed), delivery status, timestamps. Kept 14 days |
+| AI request records | Yes (no content) | Which model was used, an estimate of tokens, outcome, counts. Never the text sent or received. Kept 30 days |
+| Sender learning counters | Yes (hash-only) | How many times you confirmed, completed, or dismissed items from a sender, keyed by a one-way hash. Clearable in Settings |
 | Calendar events | Yes (minimal) | Title, start/end, status, and one-way hashes of invitees' emails plus their domains (used to recognize "sender is invited to this event"). **Not stored:** description, location, attendee names or addresses, meeting links. Kept until 14 days after the event |
 | Google refresh tokens | Yes | **Encrypted**, server-side only, used to read Gmail/Calendar on your behalf; deleted on disconnect or account deletion. Never sent to your browser |
 | Heed session token | Yes (hash on server; token in your browser) | Lets the extension talk to Heed; revocable from Settings |
@@ -59,10 +63,10 @@ Heed does not use AI for anything else in V1 (no summaries, no replies, no train
 
 The disclosure shown depends on the tier of the Gemini API configured for the service:
 
-- **Variant A (default, required for beta launch): paid-tier terms.** Under Google's published paid-service terms, Google does not use prompts and responses to improve its products; it may retain them for a limited period for abuse monitoring and legal compliance. Heed's server will refuse to enable Gmail processing in production unless it is configured for this tier (AI.md section 5).
-- **Variant B (only if the project owner explicitly accepts the free tier; see DECISIONS unresolved #1):** under Google's free-tier terms, prompts and responses **may be used to improve Google's products and may be reviewed by humans.** Beta users would be told this on the consent screen before connecting Gmail, in plain words, and could decline. This variant is **not recommended** for mail content and conflicts with the Limited Use rules for Gmail data, which is why Variant A is the default.
+- **Variant A (paid-tier terms; required before any public launch or verification submission).** Under Google's published paid-service terms, Google does not use prompts and responses to improve its products; it may retain them for a limited period for abuse monitoring and legal compliance. In this mode the server uses only pool entries whose terms prohibit training and the consent text matches. Which variant applies is a configuration state that the server checks at boot and per user (the tier guard in AI.md section 5); it never silently falls back to a different variant.
+- **Variant B (free-tier mode; the Stage 0 owner decision for the closed beta, see DECISIONS D-18):** under Google's free-tier terms, prompts and responses **may be used to improve Google's products and may be reviewed by humans.** Every beta user is told this in plain words on the consent screen **before** connecting Gmail and can decline (declining means Heed will not run AI analysis for them; calendar-only use remains possible). Because the provider's terms (as summarized by secondary sources) only allow free services for users **outside the EEA, Switzerland, and the UK**, free-tier mode also requires each user's region attestation, and the server refuses AI analysis without it. This variant is in tension with Google's Limited Use rules for Gmail data, which is why it is limited to a closed beta, why the tier guard fails closed, and why it must end (switching to Variant A by configuration) before any verification submission or public launch. The excerpts may also contain other people's words (for example a recruiter's message); Variant B text says so.
 
-The consent text records which variant the user accepted (consent `version`).
+The consent record stores which variant the user accepted (`Consent.variant`) together with the text version; if the configured tier changes, previous consents become stale and the user is asked again (`CONSENT_VARIANT_STALE`).
 
 ## 5. Data subjects' controls (all in the product)
 
@@ -89,7 +93,7 @@ Deletion is immediate in Heed's database. The database provider keeps a short po
 | Open and suggested tasks | Until you act (unreviewed suggestions auto-dismiss after 14 days) |
 | Completed and dismissed tasks | 90 days, then deleted |
 | Calendar events | 14 days after they end |
-| Message examination log | 45 days |
+| Message examination log | 30 days |
 | "Do not re-detect" markers | 365 days or until you clear them |
 | Reminder records | 14 days after delivery |
 | Audit events / operational AI call metadata | 90 days / 30 days |
@@ -124,7 +128,7 @@ Shown before any Google connection; versioned and recorded (`Consent` table); ea
 
 **Screen 3: Beta notes.** "Heed is in private beta. Google will show an 'unverified app' warning because verification is not complete; you can see exactly what you are granting. Reminders appear only while Chrome is running."
 
-Checkboxes (both required to proceed to Gmail): "I agree to Heed processing my Google data as described" (`GOOGLE_DATA_PROCESSING`) and "I understand a redacted excerpt of some emails is sent to Google's Gemini API" (`AI_PROCESSING`). Calendar-only use requires the first; AI consent is needed for detection from calendar descriptions as well.
+Checkboxes (the first two are required to proceed to Gmail): "I agree to Heed processing my Google data as described" (`GOOGLE_DATA_PROCESSING`) and "I understand a redacted excerpt of some emails is sent to Google's Gemini API, as described above" (`AI_PROCESSING`, recorded with the disclosure variant shown). In free-tier mode a third required attestation, "I am not located in the EEA, Switzerland, or the UK" (`REGION_ATTESTATION`), is shown. An **optional, unticked** choice, "Let Heed also read emails I send to find things I promised to do" (`SENT_MAIL_COMMITMENTS`), controls sent-mail processing. Calendar-only use requires the first; AI consent is needed for detection from calendar descriptions as well. Each is revocable in Settings.
 
 ## 9. Regulatory and platform alignment
 
@@ -138,7 +142,7 @@ Checkboxes (both required to proceed to Gmail): "I agree to Heed processing my G
 
 | Risk | Likelihood / impact | Mitigation |
 |---|---|---|
-| Sensitive email content leaves the user's control via AI | Possible / high | Deterministic pre-filter (about 3% reach AI), redaction, 1,500-char cap, paid-tier no-training terms, tier guard, per-user consent, pause and withdraw |
+| Sensitive email content leaves the user's control via AI | Possible / high | Deterministic pre-filter (about 3% reach AI), redaction, 1,500-char cap, tier guard that fails closed, per-user consent in the matching disclosure variant, region attestation, pause and withdraw, and a no-training tier available by configuration (mandatory before public launch). In free-tier mode this risk is **accepted and disclosed**, not eliminated |
 | Over-collection from Gmail | Possible / high | Read-only scope; headers first; bodies transient; Spam/Promotions/Social excluded; mute rules; bounded backfill (default 14 days) |
 | Server reads bodies of non-bulk mail that is later dropped | Certain / medium | Disclosed; in-memory only; never logged or stored; (alternative designs considered: DECISIONS D-05) |
 | Re-identification via stored evidence | Possible / medium | Encrypted; minimal; retention caps; no developer read access |
