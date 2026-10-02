@@ -1,0 +1,112 @@
+# Continuous integration. Needs NO secrets: it runs identically for pull requests from forks.
+# Least privilege: the workflow token can only read repository contents.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Public extension configuration for build verification only (no secrets, no real service).
+  VITE_API_BASE_URL: http://localhost:8787
+  VITE_ENV: test
+
+jobs:
+  verify:
+    name: Verify (lint, types, tests, boundaries, builds, bundle scan)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: 1. Install (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
+      - name: Format check
+        run: pnpm format:check
+
+      - name: 2. Lint
+        run: pnpm lint
+
+      - name: 3. Typecheck
+        run: pnpm typecheck
+
+      - name: 4. Unit tests (includes log canary, config, error model, CORS, request ids)
+        run: pnpm test
+
+      - name: 5. Boundary tests (extension must not import server code)
+        run: pnpm test:boundaries
+
+      - name: 5b. Boundary check on the repository
+        run: pnpm check:boundaries
+
+      - name: 6. Build extension
+        run: pnpm build:extension
+
+      - name: 7. Extension bundle secret scan
+        run: pnpm scan:bundle
+
+      - name: 8. Build API
+        run: pnpm build:api
+
+  extension-e2e:
+    name: Extension loads in Chromium
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium
+        run: pnpm --filter @heed/extension exec playwright-core install --with-deps chromium
+
+      - name: Load the built extension in a real browser
+        run: pnpm --filter @heed/extension test:e2e
+
+  docker:
+    name: 9. Docker build smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Build the production image and verify it (non-root, read-only FS, fail-closed, no secrets)
+        run: bash scripts/docker-smoke.sh

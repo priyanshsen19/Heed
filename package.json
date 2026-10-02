@@ -1,0 +1,38 @@
+{
+  "name": "heed",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Heed: understands what you need to do and reminds you when it matters.",
+  "type": "module",
+  "packageManager": "pnpm@10.28.0",
+  "engines": {
+    "node": ">=24.21.0 <25",
+    "pnpm": ">=10.28.0"
+  },
+  "scripts": {
+    "build": "pnpm build:api && pnpm build:extension",
+    "build:api": "pnpm --filter @heed/api build",
+    "build:extension": "pnpm --filter @heed/extension build",
+    "dev:api": "pnpm --filter @heed/api dev",
+    "dev:extension": "pnpm --filter @heed/extension dev",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "pnpm -r --workspace-concurrency=1 typecheck",
+    "test": "pnpm -r --workspace-concurrency=1 test",
+    "test:boundaries": "pnpm --filter @heed/scripts test:boundaries",
+    "check:boundaries": "pnpm --filter @heed/scripts check:boundaries",
+    "scan:bundle": "pnpm --filter @heed/scripts scan:bundle",
+    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm check:boundaries && pnpm build && pnpm scan:bundle"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "dependency-cruiser": "18.5.0",
+    "eslint": "10.12.0",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "globals": "17.13.0",
+    "prettier": "3.9.9",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.71.0"
+  }
+}

@@ -7,6 +7,7 @@ Status: Draft for sign-off. Transport: HTTPS, JSON, base path `/v1`. Request and
 | Topic | Rule |
 |---|---|
 | Auth | `Authorization: Bearer <heed-session-token>` on all `/v1` routes except `/v1/auth/google/start`, `/v1/auth/google/callback`, `/v1/auth/token`. No cookies are used, so there is no CSRF surface on the JSON API |
+| Request ids | Every response carries `X-Request-ID`. A caller-supplied `X-Request-ID` is propagated only if it is 8–64 characters of `A-Za-z0-9._-`; otherwise a UUID is generated. The id appears in every log line and in every error body (`requestId`). It is a correlation aid only and never authenticates anything *(Stage 1)* |
 | Client identity | `X-Heed-Client: extension/<semver>`. Server may return `426 Upgrade Required` (`code: CLIENT_TOO_OLD`) below `MIN_CLIENT_VERSION` |
 | IDs | UUID v4 strings |
 | Times | ISO 8601 UTC (`2026-10-07T11:00:00Z`) plus an IANA `timezone` field where local semantics matter |
@@ -208,7 +209,7 @@ The extension's delta feed; **always one bounded page** (limit default 100, max 
 
 | Endpoint | Auth | Purpose |
 |---|---|---|
-| `POST /internal/tick` | Google-signed OIDC ID token from the scheduler service account; verified `aud` = service URL and `email` = scheduler SA; otherwise `401`. Not CORS-enabled | Enqueue due syncs, run jobs within budget, run due purge. Response: summary counts only |
+| `POST /internal/tick` | Google-signed OIDC ID token from the scheduler service account; verified signature (Google JWKS), `iss`, `aud` = service URL, expiry, `email` = scheduler SA and `email_verified`; otherwise a generic `401`. Not CORS-enabled (preflights get `404`). The endpoint does not exist when no verifier is configured | Enqueue due syncs, run jobs within budget, run due purge. Stage 1 response: `{ status: "ok", handlersRun: n, processing: "enabled"\|"disabled" }`; `processing=false` (kill switch) runs no handlers |
 | `GET /healthz` | none | Liveness (process up). Constant response |
 | `GET /readyz` | none | DB reachable and config valid. Constant response with no details |
 
@@ -224,7 +225,7 @@ The extension's delta feed; **always one bounded page** (limit default 100, max 
 
 ## 12. Error codes (stable)
 
-`VALIDATION_FAILED` 400 · `CURSOR_INVALID` 400 · `CONSENT_VARIANT_STALE` 409 · `UNAUTHENTICATED` 401 · `SESSION_EXPIRED` 401 · `NOT_FOUND` 404 · `VERSION_CONFLICT` 409 · `INVALID_TRANSITION` 409 · `CLIENT_TOO_OLD` 426 · `PROCESSING_PAUSED` 423 · `RATE_LIMITED` 429 · `NOT_ON_BETA_LIST` 403 · `CONSENT_REQUIRED` 403 · `INTEGRATION_NOT_CONNECTED` 409 · `INTEGRATION_NEEDS_REAUTH` 409 · `OAUTH_STATE_INVALID` 400 · `OAUTH_ACCOUNT_MISMATCH` 400 · `OAUTH_NO_REFRESH_TOKEN` 400 · `OAUTH_REDIRECT_NOT_ALLOWED` 400 · `OAUTH_CODE_INVALID` 400 · `IDEMPOTENCY_KEY_REUSED` 422 · `INTERNAL` 500 · `UPSTREAM_UNAVAILABLE` 502.
+`VALIDATION_FAILED` 400 · `CURSOR_INVALID` 400 · `METHOD_NOT_ALLOWED` 405 · `PAYLOAD_TOO_LARGE` 413 · `UNSUPPORTED_MEDIA_TYPE` 415 · `CONSENT_VARIANT_STALE` 409 · `UNAUTHENTICATED` 401 · `SESSION_EXPIRED` 401 · `NOT_FOUND` 404 · `VERSION_CONFLICT` 409 · `INVALID_TRANSITION` 409 · `CLIENT_TOO_OLD` 426 · `PROCESSING_PAUSED` 423 · `RATE_LIMITED` 429 · `NOT_ON_BETA_LIST` 403 · `CONSENT_REQUIRED` 403 · `INTEGRATION_NOT_CONNECTED` 409 · `INTEGRATION_NEEDS_REAUTH` 409 · `OAUTH_STATE_INVALID` 400 · `OAUTH_ACCOUNT_MISMATCH` 400 · `OAUTH_NO_REFRESH_TOKEN` 400 · `OAUTH_REDIRECT_NOT_ALLOWED` 400 · `OAUTH_CODE_INVALID` 400 · `IDEMPOTENCY_KEY_REUSED` 422 · `INTERNAL` 500 · `UPSTREAM_UNAVAILABLE` 502.
 
 ## 13. Authorization matrix
 

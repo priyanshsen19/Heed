@@ -1,0 +1,33 @@
+{
+  "name": "@heed/extension",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Heed Chrome extension (Manifest V3). A thin client: presentation, local cache, session state, Chrome integration. No business logic, no secrets.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite build --configLoader runner --watch --mode development",
+    "build": "vite build --configLoader runner",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:e2e": "vitest run --config vitest.e2e.config.ts"
+  },
+  "dependencies": {
+    "@heed/shared": "workspace:*",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@testing-library/dom": "10.4.2",
+    "@testing-library/react": "16.3.3",
+    "@types/chrome": "0.3.4",
+    "@types/node": "24.19.1",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.1",
+    "jsdom": "30.1.1",
+    "playwright-core": "1.63.0",
+    "vite": "8.3.2",
+    "vitest": "5.0.3"
+  }
+}

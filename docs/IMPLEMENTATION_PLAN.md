@@ -24,6 +24,8 @@ Status: Stage 0 deliverable. This plan turns the validated architecture (ARCHITE
 - **Rollback:** revert the PR; infrastructure scripts are idempotent and documented teardown steps are in `infra/README.md`; staging is disposable.
 - **Scalability:** stateless process, injected config, no globals; pinned Node; container is horizontally scalable from day one.
 
+> **Stage 1 completion note (2026-10-02).** Implemented and verified except the cloud deployment, which is **blocked on credentials**: the build environment has no usable Google Cloud identity (`gcloud` reports `CREDENTIALS_MISSING`, no project configured). Everything up to the deploy is done and tested: monorepo, strict tooling, boundary enforcement, API foundation, extension shell (loaded and exercised in real Chromium), bundle scan, production container (built and verified non-root, read-only, fail-closed), CI, deploy workflow, and infrastructure files. Exit criterion still open: **run `infra/scripts/bootstrap-staging.sh` with a GCP project, run the staging deploy workflow, and record cold start, latency, and `/healthz`-on-Cloud-Run behavior in docs/DECISIONS.md.** Details, measurements, and deviations: `docs/STAGE_NOTES/STAGE_1.md`.
+
 ## Stage 2: Database
 
 - **Objective:** the full DATA_MODEL in PostgreSQL with the idempotency constraints, due-time indexes, encryption, job queue, rate limiter, and data-inventory registry, before any feature uses them.

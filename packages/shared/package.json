@@ -1,0 +1,21 @@
+{
+  "name": "@heed/shared",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Transport contracts and browser-safe primitives shared by the API and the extension. No secrets, no I/O, no database models.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing": "./src/testing.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "vitest": "5.0.3"
+  }
+}

@@ -80,7 +80,8 @@ heed/
 │   ├── ai/                             # SERVER ONLY: AiProvider interface, GeminiProvider (+ optional second adapter),
 │   │                                   # FakeProvider, versioned prompts (extract-v2), output schemas + validators
 │   ├── eval/                           # SERVER/CI ONLY: labeled synthetic corpus + metrics runner
-│   └── config/                         # eslint, tsconfig, prettier, vitest base configs
+│   └── config/                         # SERVER ONLY: fail-closed env config, runtime-secret schema, SecretsProvider
+│                                       # (tooling configs live at the repo root: tsconfig.base.json, eslint.config.mjs)
 ├── docs/                               # these documents
 ├── infra/                              # Dockerfile, Cloud Run service YAML, scheduler/secret bootstrap
 │                                       # scripts, README for one-time GCP/Neon/Google Cloud Console setup
@@ -98,6 +99,7 @@ Enforced dependency rules (eslint `no-restricted-imports` plus dependency-cruise
 | `apps/extension` | `packages/shared` | `apps/api`, `packages/detection`, `packages/ai`, `packages/eval`, any Node-only module |
 | `packages/shared` | nothing internal | everything else (no secrets, no IO, browser- and Node-safe) |
 | `apps/api` | all `packages/*` | `apps/extension` |
+| `packages/config` | `packages/shared` | `apps/*`, extension code (server-only, never reachable from the extension) |
 | `packages/detection`, `packages/ai` | `packages/shared` | `apps/*`, Prisma, `process.env` (config injected) |
 
 ## 3. Chrome extension architecture (D-01)

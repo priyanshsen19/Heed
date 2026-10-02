@@ -1,0 +1,20 @@
+# Keep the build context minimal and free of secrets.
+**/node_modules
+**/dist
+**/coverage
+**/.vite
+.git
+.github
+docs
+**/*.md
+**/.env
+**/.env.*
+.secrets.local.json
+**/test
+**/*.test.ts
+**/*.test.tsx
+scripts/__fixtures__
+# The extension is never part of the API image; only its package.json is needed so the workspace
+# lockfile resolves.
+apps/extension/*
+!apps/extension/package.json

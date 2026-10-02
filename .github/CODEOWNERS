@@ -1,0 +1,30 @@
+# Code owners protect security-sensitive paths (docs/SECURITY.md section 13).
+#
+# NOTE: the owner below is the repository owner (from the repository URL). It is a single-person
+# placeholder, not an invented organization: replace it with a team handle when a team exists, and turn on
+# "Require review from Code Owners" in branch protection so these paths cannot change without review.
+
+* @priyanshsen19
+
+# Extension attack surface: manifest, build, and storage/network guards
+/apps/extension/manifest.config.ts @priyanshsen19
+/apps/extension/vite.config.ts @priyanshsen19
+/apps/extension/src/background/storage.ts @priyanshsen19
+/apps/extension/src/background/api-client.ts @priyanshsen19
+
+# Security-critical server code
+/apps/api/src/ports/ @priyanshsen19
+/apps/api/src/http/ @priyanshsen19
+/apps/api/src/observability/ @priyanshsen19
+/packages/config/ @priyanshsen19
+
+# Boundaries, secret scanning, CI, and deployment
+/.dependency-cruiser.cjs @priyanshsen19
+/eslint.config.mjs @priyanshsen19
+/scripts/bundle-scan.ts @priyanshsen19
+/.github/ @priyanshsen19
+/infra/ @priyanshsen19
+
+# Security and privacy documents
+/docs/SECURITY.md @priyanshsen19
+/docs/PRIVACY.md @priyanshsen19

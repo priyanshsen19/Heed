@@ -1,0 +1,26 @@
+{
+  "name": "@heed/scripts",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Operational tooling: extension bundle secret scan, boundary checks, local secrets generator. Not part of any runtime artifact.",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:boundaries": "vitest run boundaries.test.ts",
+    "check:boundaries": "cd .. && depcruise apps packages scripts --config .dependency-cruiser.cjs",
+    "scan:bundle": "tsx bundle-scan.ts ../apps/extension/dist",
+    "gen:local-secrets": "tsx gen-local-secrets.ts"
+  },
+  "dependencies": {
+    "@heed/config": "workspace:*",
+    "@heed/shared": "workspace:*",
+    "@types/node": "24.19.1",
+    "dependency-cruiser": "18.5.0",
+    "tsx": "4.23.15",
+    "vitest": "5.0.3"
+  },
+  "devDependencies": {
+    "yaml": "2.8.1"
+  }
+}

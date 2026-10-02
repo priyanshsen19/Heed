@@ -1,0 +1,78 @@
+# Deploys the API to STAGING. Manual only (workflow_dispatch) and inert until the `staging` GitHub
+# environment has been configured by infra/scripts/bootstrap-staging.sh. No long-lived credentials:
+# Google Cloud access is via Workload Identity Federation (OIDC), restricted to this repository.
+name: Deploy API (staging)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # required for Workload Identity Federation
+
+concurrency:
+  group: deploy-api-staging
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build, push, deploy, smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment: staging
+    if: ${{ vars.GCP_PROJECT_ID != '' }}
+    env:
+      PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      REGION: ${{ vars.GCP_REGION }}
+      EXTENSION_ORIGIN: ${{ vars.EXTENSION_ORIGIN }}
+      IMAGE: ${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/heed/api:${{ github.sha }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Authenticate to Google Cloud (Workload Identity Federation)
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+
+      - name: Build and push the image
+        run: |
+          docker build -f infra/Dockerfile -t "$IMAGE" .
+          docker push "$IMAGE"
+
+      - name: Deploy the service
+        run: |
+          SERVICE_URL="$(gcloud run services describe heed-api-staging --region "$REGION" --project "$PROJECT_ID" --format 'value(status.url)' 2>/dev/null || true)"
+          if [ -z "$SERVICE_URL" ]; then
+            # First deploy: the URL is deterministic only after creation; create with a placeholder, then re-apply.
+            export SERVICE_URL="https://placeholder.invalid"
+            envsubst < infra/cloudrun/service.staging.yaml | gcloud run services replace - --region "$REGION" --project "$PROJECT_ID"
+            SERVICE_URL="$(gcloud run services describe heed-api-staging --region "$REGION" --project "$PROJECT_ID" --format 'value(status.url)')"
+          fi
+          export SERVICE_URL
+          envsubst < infra/cloudrun/service.staging.yaml | gcloud run services replace - --region "$REGION" --project "$PROJECT_ID"
+          gcloud run services add-iam-policy-binding heed-api-staging --region "$REGION" --project "$PROJECT_ID" \
+            --member allUsers --role roles/run.invoker >/dev/null
+          echo "SERVICE_URL=$SERVICE_URL" >> "$GITHUB_ENV"
+
+      - name: Smoke test over HTTPS (health, readiness, latency)
+        run: |
+          for path in healthz readyz; do
+            ok=0
+            for attempt in 1 2 3 4 5 6; do
+              code="$(curl -s -o /dev/null -w '%{http_code} %{time_total}s' "${SERVICE_URL}/${path}" || true)"
+              echo "GET /${path}: ${code}"
+              case "$code" in 200*) ok=1; break;; esac
+              sleep 5
+            done
+            [ "$ok" = 1 ] || { echo "smoke test failed for /${path}"; exit 1; }
+          done

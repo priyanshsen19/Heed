@@ -1,0 +1,71 @@
+# Cloud Run service definition for STAGING (smallest reasonable configuration; scale-to-zero).
+# Apply with:  envsubst < infra/cloudrun/service.staging.yaml | gcloud run services replace - --region "$REGION"
+# Required variables: PROJECT_ID, REGION, IMAGE, SERVICE_URL, EXTENSION_ORIGIN
+# (SERVICE_URL is the service's public https URL, which is also the OIDC audience for /internal/tick.)
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: heed-api-staging
+  labels:
+    app: heed-api
+    env: staging
+  annotations:
+    run.googleapis.com/ingress: all
+spec:
+  template:
+    metadata:
+      annotations:
+        # Free-tier guardrails (docs/DECISIONS.md D-11, D-12): never more than two instances, scale to zero,
+        # CPU only during requests (request-based billing).
+        autoscaling.knative.dev/minScale: '0'
+        autoscaling.knative.dev/maxScale: '2'
+        run.googleapis.com/cpu-throttling: 'true'
+        run.googleapis.com/startup-cpu-boost: 'true'
+    spec:
+      serviceAccountName: heed-api-runtime@${PROJECT_ID}.iam.gserviceaccount.com
+      containerConcurrency: 40
+      timeoutSeconds: 300
+      containers:
+        - image: ${IMAGE}
+          ports:
+            - containerPort: 8080
+          resources:
+            limits:
+              cpu: '1'
+              memory: 512Mi
+          env:
+            - name: HEED_ENV
+              value: staging
+            - name: LOG_LEVEL
+              value: info
+            - name: TRUST_PROXY
+              value: 'true'
+            - name: PROCESSING_ENABLED
+              value: 'true'
+            - name: SERVICE_URL
+              value: ${SERVICE_URL}
+            - name: SCHEDULER_SA_EMAIL
+              value: heed-scheduler@${PROJECT_ID}.iam.gserviceaccount.com
+            - name: CORS_ALLOWED_ORIGINS
+              value: ${EXTENSION_ORIGIN}
+            # The single runtime JSON secret (DECISIONS D-11): injected by the platform when the instance
+            # starts. It never appears in this file, the image, or CI logs.
+            - name: HEED_RUNTIME_SECRETS_JSON
+              valueFrom:
+                secretKeyRef:
+                  name: heed-runtime-config
+                  key: latest
+          startupProbe:
+            httpGet:
+              path: /readyz
+              port: 8080
+            periodSeconds: 2
+            failureThreshold: 15
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            periodSeconds: 30
+  traffic:
+    - percent: 100
+      latestRevision: true
